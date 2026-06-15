@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
 from io import BytesIO
 
 # =====================================================
@@ -19,9 +18,6 @@ st.markdown("""
 <style>
 html, body, [class*="css"] {
     font-family: Arial, sans-serif;
-}
-.main {
-    background-color: #F4F7F9;
 }
 .metric-card {
     background: linear-gradient(135deg, #1F497D, #16355C);
@@ -51,10 +47,6 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 
 
-# =========================
-# FUNCIONES BASE
-# =========================
-
 def to_num(val):
     try:
         if pd.isna(val) or val == "":
@@ -81,19 +73,15 @@ def find_column(df, possible_names):
     return None
 
 
-# =========================
-# CARGA DE DATOS
-# =========================
-
-@st.cache_data(ttl=3600, show_spinner=False)
 def load_excel(file):
-    return pd.ExcelFile(file, engine="openpyxl")
+    data = file.read()
+    return pd.ExcelFile(BytesIO(data), engine="openpyxl")
 
 
 def prepare_operacion(df):
     df = clean_columns(df)
 
-    rename_map = {
+    df = df.rename(columns={
         "Ubicación": "Tienda",
         "Ubicacion": "Tienda",
         "Piezas de Ingreso": "Total_Ing",
@@ -102,20 +90,18 @@ def prepare_operacion(df):
         "Piezas Ubicadas": "Pzas_Ubi",
         "Recorridos Realizados": "Real_Rec",
         "Meta de Recorridos": "Meta_Rec"
-    }
-
-    df = df.rename(columns=rename_map)
+    })
 
     for col in ["Total_Ing", "Pzas_Hab", "Pzas_Ubi", "Real_Rec", "Meta_Rec"]:
-        if col in df.columns:
-            df[col] = df[col].apply(to_num)
-        else:
+        if col not in df.columns:
             df[col] = 0
+        df[col] = df[col].apply(to_num)
 
     if "Tienda" not in df.columns:
         df["Tienda"] = "Sin tienda"
 
     fecha_col = find_column(df, ["Fecha", "Dia", "Día"])
+
     if fecha_col:
         df["Fecha_DT"] = pd.to_datetime(df[fecha_col], errors="coerce")
         df["Semana"] = df["Fecha_DT"].dt.isocalendar().week.astype("Int64")
@@ -148,11 +134,8 @@ def prepare_productividad(df):
     df["Pzas"] = df["Pzas"].apply(to_num)
 
     if "Nombre" not in df.columns:
-        posible_nombre = find_column(df, ["Colaborador", "Usuario", "Empleado", "Nombre Completo"])
-        if posible_nombre:
-            df["Nombre"] = df[posible_nombre]
-        else:
-            df["Nombre"] = "Sin colaborador"
+        posible_nombre = find_column(df, ["Colaborador", "Usuario", "Empleado", "Nombre Completo", "nombre"])
+        df["Nombre"] = df[posible_nombre] if posible_nombre else "Sin colaborador"
 
     return df
 
@@ -166,14 +149,14 @@ def prepare_modelos(xls):
     if not sheet_mod:
         return pd.DataFrame()
 
-    raw = pd.read_excel(
-        xls,
-        sheet_name=sheet_mod[0],
-        header=None,
-        engine="openpyxl"
-    )
-
     try:
+        raw = pd.read_excel(
+            xls,
+            sheet_name=sheet_mod[0],
+            header=None,
+            engine="openpyxl"
+        )
+
         fechas = raw.iloc[0].tolist()
         cabs = raw.iloc[1].tolist()
 
@@ -201,6 +184,7 @@ def prepare_modelos(xls):
                 continue
 
             fecha = pd.to_datetime(fechas[i], errors="coerce")
+
             if pd.isna(fecha):
                 continue
 
@@ -219,13 +203,9 @@ def prepare_modelos(xls):
 
         return df
 
-    except:
+    except Exception:
         return pd.DataFrame()
 
-
-# =========================
-# SIDEBAR
-# =========================
 
 st.sidebar.title("🎛️ ORION Control Center")
 
@@ -234,13 +214,7 @@ uploaded_file = st.sidebar.file_uploader(
     type=["xlsx"]
 )
 
-st.sidebar.info(
-    "Sube el archivo base de operaciones para iniciar el análisis."
-)
-
-# =========================
-# INICIO
-# =========================
+st.sidebar.info("Sube el archivo base de operaciones para iniciar el análisis.")
 
 st.title("📈 ORION Recovery Intelligence")
 st.caption("Plataforma Nacional de Recuperación de Mercancía | Operaciones Ropa")
@@ -257,10 +231,6 @@ except Exception as e:
 
 st.sidebar.success("Archivo cargado correctamente")
 
-# =========================
-# DETECCIÓN DE HOJAS
-# =========================
-
 sheet_names = xls.sheet_names
 
 st.sidebar.markdown("### Hojas detectadas")
@@ -269,47 +239,49 @@ for s in sheet_names:
 
 sheet_op = [
     s for s in sheet_names
-    if "base" in s.lower() or "operacion" in s.lower() or "operación" in s.lower()
+    if "base" in s.lower()
+    or "operacion" in s.lower()
+    or "operación" in s.lower()
+    or "productividad" in s.lower()
+    or "resultados" in s.lower()
 ]
 
 sheet_colab = [
     s for s in sheet_names
-    if "colab" in s.lower() or "productividad" in s.lower() or "usuario" in s.lower()
+    if "colab" in s.lower()
+    or "productividad" in s.lower()
+    or "usuario" in s.lower()
+    or "resultados" in s.lower()
 ]
 
-if sheet_op:
-    df_op_raw = pd.read_excel(xls, sheet_name=sheet_op[0], engine="openpyxl")
-else:
-    df_op_raw = pd.read_excel(xls, sheet_name=sheet_names[0], engine="openpyxl")
+try:
+    if sheet_op:
+        df_op_raw = pd.read_excel(xls, sheet_name=sheet_op[0], engine="openpyxl")
+    else:
+        df_op_raw = pd.read_excel(xls, sheet_name=sheet_names[0], engine="openpyxl")
 
-df_op = prepare_operacion(df_op_raw)
+    df_op = prepare_operacion(df_op_raw)
+
+except Exception as e:
+    st.error(f"No se pudo preparar la hoja operativa: {e}")
+    st.stop()
 
 if sheet_colab:
-    df_colab_raw = pd.read_excel(xls, sheet_name=sheet_colab[0], engine="openpyxl")
-    df_colab = prepare_productividad(df_colab_raw)
+    try:
+        df_colab_raw = pd.read_excel(xls, sheet_name=sheet_colab[0], engine="openpyxl")
+        df_colab = prepare_productividad(df_colab_raw)
+    except Exception:
+        df_colab = pd.DataFrame(columns=["Tienda", "Nombre", "Pzas"])
 else:
     df_colab = pd.DataFrame(columns=["Tienda", "Nombre", "Pzas"])
 
 df_models = prepare_modelos(xls)
 
-# =========================
-# FILTROS
-# =========================
-
 weeks = sorted([w for w in df_op["Semana"].dropna().unique()])
 stores = sorted([t for t in df_op["Tienda"].dropna().unique()])
 
-sel_w = st.sidebar.multiselect(
-    "Semanas",
-    weeks,
-    default=weeks
-)
-
-sel_s = st.sidebar.multiselect(
-    "Tiendas",
-    stores,
-    default=stores
-)
+sel_w = st.sidebar.multiselect("Semanas", weeks, default=weeks)
+sel_s = st.sidebar.multiselect("Tiendas", stores, default=stores)
 
 df_f = df_op[
     df_op["Semana"].isin(sel_w) &
@@ -325,11 +297,6 @@ df_mf = df_models[
     df_models["Tienda"].isin(sel_s)
 ] if not df_models.empty else pd.DataFrame()
 
-
-# =========================
-# KPIS
-# =========================
-
 ing_t = df_f["Total_Ing"].sum()
 hab_t = df_f["Pzas_Hab"].sum()
 ubi_t = df_f["Pzas_Ubi"].sum()
@@ -342,21 +309,14 @@ conv_g = 0
 val_rec = 0
 
 if not df_mf.empty:
-    df_mf["Rec_Pzas"] = df_mf.apply(
-        lambda r: min(r["Dev"], r["Venta"]),
-        axis=1
-    )
+    df_mf = df_mf.copy()
+    df_mf["Rec_Pzas"] = df_mf.apply(lambda r: min(r["Dev"], r["Venta"]), axis=1)
     conv_g = safe_div(df_mf["Rec_Pzas"].sum(), df_mf["Dev"].sum()) * 100
     df_mf["Rec_Val"] = df_mf.apply(
         lambda r: r["Neta_$"] * safe_div(min(r["Dev"], r["Venta"]), r["Venta"]),
         axis=1
     )
     val_rec = df_mf["Rec_Val"].sum()
-
-
-# =========================
-# TABS
-# =========================
 
 tabs = st.tabs([
     "🚀 Resumen Ejecutivo",
@@ -368,75 +328,55 @@ tabs = st.tabs([
     "🧾 Estructura del Archivo"
 ])
 
-
-# =========================
-# TAB 1
-# =========================
-
 with tabs[0]:
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">Total Ingresos</div>
-                <div class="metric-value">{ing_t:,.0f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">Total Ingresos</div>
+            <div class="metric-value">{ing_t:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     with c2:
-        st.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">% Habilitado</div>
-                <div class="metric-value">{hab_pct:.1f}%</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">% Habilitado</div>
+            <div class="metric-value">{hab_pct:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     with c3:
-        st.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">% Ubicado</div>
-                <div class="metric-value">{ubi_pct:.1f}%</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">% Ubicado</div>
+            <div class="metric-value">{ubi_pct:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     with c4:
-        st.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">Recuperación $</div>
-                <div class="metric-value">${val_rec:,.0f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">Recuperación $</div>
+            <div class="metric-value">${val_rec:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown('<p class="section-title">Evolución Semanal</p>', unsafe_allow_html=True)
 
     wow = df_op.groupby("Semana", as_index=False)["Total_Ing"].sum()
 
-    fig = px.area(
-        wow,
-        x="Semana",
-        y="Total_Ing",
-        title="Tendencia de Ingresos por Semana"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# =========================
-# TAB 2
-# =========================
+    if not wow.empty:
+        fig = px.area(
+            wow,
+            x="Semana",
+            y="Total_Ing",
+            title="Tendencia de Ingresos por Semana"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No hay datos suficientes para graficar evolución semanal.")
 
 with tabs[1]:
     st.markdown('<p class="section-title">Funnel Operativo</p>', unsafe_allow_html=True)
@@ -474,11 +414,6 @@ with tabs[1]:
 
     st.dataframe(resumen_tienda, use_container_width=True)
 
-
-# =========================
-# TAB 3
-# =========================
-
 with tabs[2]:
     st.markdown('<p class="section-title">Ranking de Productividad</p>', unsafe_allow_html=True)
 
@@ -508,14 +443,8 @@ with tabs[2]:
         )
 
         st.plotly_chart(fig_prod, use_container_width=True)
-
     else:
         st.warning("No se encontró hoja de productividad o colaboradores.")
-
-
-# =========================
-# TAB 4
-# =========================
 
 with tabs[3]:
     st.markdown('<p class="section-title">Conversión Comercial</p>', unsafe_allow_html=True)
@@ -549,14 +478,8 @@ with tabs[3]:
         )
 
         st.plotly_chart(fig_heat, use_container_width=True)
-
     else:
         st.info("No se detectó hoja de venta y devolución.")
-
-
-# =========================
-# TAB 5
-# =========================
 
 with tabs[4]:
     st.markdown('<p class="section-title">Recuperación Económica</p>', unsafe_allow_html=True)
@@ -593,16 +516,9 @@ with tabs[4]:
         )
 
         st.plotly_chart(fig_rent, use_container_width=True)
-
         st.dataframe(rent, use_container_width=True)
-
     else:
         st.info("No hay información económica disponible.")
-
-
-# =========================
-# TAB 6
-# =========================
 
 with tabs[5]:
     st.markdown('<p class="section-title">Alertas Inteligentes</p>', unsafe_allow_html=True)
@@ -623,11 +539,6 @@ with tabs[5]:
         st.success("✅ Operación dentro de rango aceptable.")
 
     st.info("Revisa tiendas con menor porcentaje de habilitado, ubicado y productividad.")
-
-
-# =========================
-# TAB 7
-# =========================
 
 with tabs[6]:
     st.markdown('<p class="section-title">Estructura del Archivo</p>', unsafe_allow_html=True)
